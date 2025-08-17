@@ -8,16 +8,25 @@ import sqlite3
 import datetime
 import re
 from typing import List, Tuple, Optional
+import os
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "ggpoker_leaderboards.db"):
+    def __init__(self, db_path: str = None):
         """
         Initialize the database manager
         
         Args:
             db_path (str): Path to the SQLite database file
         """
-        self.db_path = db_path
+        # Allow overriding via environment variable for cloud/container deployments
+        # Env var: DB_PATH (fallback to local file if not provided)
+        self.db_path = db_path or os.getenv("DB_PATH", "ggpoker_leaderboards.db")
+        # Optional cap on number of timestamp columns per table
+        # Env var: MAX_TS_COLUMNS (0 or missing means unlimited)
+        try:
+            self.max_ts_columns = int(os.getenv("MAX_TS_COLUMNS", "0"))
+        except ValueError:
+            self.max_ts_columns = 0
         self.connection = None
         self.init_database()
     
@@ -132,6 +141,9 @@ class DatabaseManager:
             
             if safe_column_name in columns:
                 print(f"    ⚠️ Column {safe_column_name} already exists in {table_name}")
+                # Even if it exists, enforce pruning if enabled
+                if self.max_ts_columns and self.max_ts_columns > 0:
+                    self._prune_old_timestamp_columns(table_name, self.max_ts_columns)
                 return True
             
             # Add new column
@@ -142,6 +154,10 @@ class DatabaseManager:
             
             self.connection.commit()
             print(f"    ✅ Added new column: {safe_column_name}")
+
+            # Optionally prune old timestamp columns if we exceed the limit
+            if self.max_ts_columns and self.max_ts_columns > 0:
+                self._prune_old_timestamp_columns(table_name, self.max_ts_columns)
             return True
             
         except Exception as e:
@@ -205,6 +221,42 @@ class DatabaseManager:
         sanitized = timestamp.replace(' ', '_').replace(':', 'h').replace('-', '_')
         sanitized = f"ts_{sanitized}"
         return sanitized
+
+    def _get_timestamp_columns(self, table_name: str) -> List[str]:
+        """Return a list of timestamp column names (those starting with 'ts_')."""
+        cursor = self.connection.cursor()
+        cursor.execute(f"PRAGMA table_info('{table_name}')")
+        all_columns = [col[1] for col in cursor.fetchall()]
+        ts_columns = [c for c in all_columns if c.startswith("ts_")]
+        # Sort by lexical order which matches chronological order with our naming scheme
+        ts_columns.sort()
+        return ts_columns
+
+    def _prune_old_timestamp_columns(self, table_name: str, max_columns: int):
+        """
+        Ensure the number of timestamp columns does not exceed max_columns.
+        Drops the oldest columns first. Best-effort: relies on SQLite >= 3.35 for DROP COLUMN.
+        """
+        try:
+            ts_columns = self._get_timestamp_columns(table_name)
+            if len(ts_columns) <= max_columns:
+                return
+
+            to_drop = len(ts_columns) - max_columns
+            columns_to_drop = ts_columns[:to_drop]
+
+            cursor = self.connection.cursor()
+            for col in columns_to_drop:
+                try:
+                    cursor.execute(f"ALTER TABLE \"{table_name}\" DROP COLUMN \"{col}\"")
+                    print(f"    🗑️ Dropped old column: {col}")
+                except Exception as drop_err:
+                    # If DROP COLUMN is not supported, log and stop pruning to avoid destructive migrations
+                    print(f"    ⚠️ Could not drop column {col}: {drop_err}")
+                    break
+            self.connection.commit()
+        except Exception as e:
+            print(f"    ⚠️ Error during pruning timestamp columns: {e}")
     
     def get_table_info(self, table_name: str) -> Optional[List[Tuple]]:
         """Get information about a specific table"""

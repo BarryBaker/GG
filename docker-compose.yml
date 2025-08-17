@@ -1,0 +1,15 @@
+# Remove the "version: '3.9'" line from docker-compose.yml
+services:
+  scraper:
+    build: .
+    image: gg-scraper:latest
+    container_name: gg_scraper
+    environment:
+      - INTERVAL=600
+      - MAX_TS_COLUMNS=12500
+      - DB_PATH=/data/ggpoker_leaderboards.db
+      - CHROME_BIN=/usr/bin/chromium
+      - CHROME_TYPE=chromium
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

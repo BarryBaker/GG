@@ -15,6 +15,11 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
+import os
+try:
+    from webdriver_manager.core.utils import ChromeType
+except ImportError:
+    from webdriver_manager.chrome import ChromeType
 
 class GGPokerScraper:
     def __init__(self, headless=False):
@@ -37,9 +42,19 @@ class GGPokerScraper:
         """Set up the Chrome WebDriver with appropriate options"""
         chrome_options = Options()
 
-        chrome_options.add_argument("--headless")
+        # Headless/non-GPU safe defaults for server/containers
+        headless_env = os.getenv("HEADLESS", "1").lower() in ("1", "true", "yes")
+        if self.headless or headless_env:
+            chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+
+        # Allow overriding Chrome binary (useful in Docker with Chromium)
+        chrome_bin = os.getenv("CHROME_BIN")
+        if chrome_bin:
+            chrome_options.binary_location = chrome_bin
 
         # if not self.headless:
         #     # Make browser visible so you can follow along
@@ -52,8 +67,16 @@ class GGPokerScraper:
         #     chrome_options.add_argument("--no-sandbox")
         #     chrome_options.add_argument("--disable-dev-shm-usage")
         
-        # Install and setup ChromeDriver automatically
-        service = Service(ChromeDriverManager().install())
+        # Install and setup ChromeDriver automatically, but allow a fixed binary path
+        chromedriver_bin = os.getenv("CHROME_DRIVER_BIN")
+        if chromedriver_bin and os.path.exists(chromedriver_bin):
+            service = Service(executable_path=chromedriver_bin)
+        else:
+            chrome_type_env = os.getenv("CHROME_TYPE", "chrome").lower()
+            if chrome_type_env == "chromium":
+                service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
+            else:
+                service = Service(ChromeDriverManager().install())
         
         try:
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -397,7 +420,8 @@ def main():
     """Main function to run the scraper"""
     parser = argparse.ArgumentParser(description="Run the GGPoker scraper")
     parser.add_argument("--headless", action="store_true", help="Run Chrome in headless mode")
-    parser.add_argument("--interval", type=int, default=0, help="Seconds between runs; 0 runs once")
+    default_interval = int(os.getenv("INTERVAL", "0"))
+    parser.add_argument("--interval", type=int, default=default_interval, help="Seconds between runs; 0 runs once")
     args = parser.parse_args()
 
     def run_once(headless_flag: bool) -> bool:
@@ -431,3 +455,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# docker-compose down
+# DOCKER_BUILDKIT=0 docker-compose up -d --build

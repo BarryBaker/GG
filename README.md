@@ -9,7 +9,7 @@ A Python scraper to access the GGPoker Omaha Daily Leaderboard page and interact
 - **Iframe Interaction**: Finds and interacts with the iframe containing the leaderboard data
 - **Step-by-Step Process**: Clear logging of each step in the scraping process
 
-## Setup
+## Setup (Local)
 
 1. **Install Python dependencies:**
    ```bash
@@ -18,10 +18,23 @@ A Python scraper to access the GGPoker Omaha Daily Leaderboard page and interact
 
 2. **Make sure you have Chrome browser installed** on your system
 
-## Usage
+## Usage (Local)
 
-Run the scraper:
+Run the scraper once:
 ```bash
+python ggpoker_scraper.py
+```
+
+Run continuously every 5 minutes:
+```bash
+python ggpoker_scraper.py --interval 300
+```
+
+Or via environment variables:
+```bash
+export INTERVAL=300
+export MAX_TS_COLUMNS=100
+export DB_PATH=ggpoker_leaderboards.db
 python ggpoker_scraper.py
 ```
 
@@ -62,6 +75,23 @@ PlayerName3     | 0                   | 0                   | 50
 Use the included viewer script:
 ```bash
 python view_database.py
+```
+
+## Run Continuously in Docker
+
+Build and run with Docker Compose (persists the SQLite DB under `./data`):
+```bash
+docker compose up -d --build
+```
+
+Environment overrides (edit `docker-compose.yml` or pass with `-e`):
+- `INTERVAL` (seconds between runs, default 300)
+- `MAX_TS_COLUMNS` (0=unlimited; otherwise keeps most recent N timestamp columns)
+- `DB_PATH` (defaults to `/data/ggpoker_leaderboards.db` inside container)
+
+Stop:
+```bash
+docker compose down
 ```
 
 ## Next Steps
