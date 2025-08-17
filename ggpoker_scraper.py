@@ -16,7 +16,13 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 import os
-from webdriver_manager.core.utils import ChromeType
+try:
+    from webdriver_manager.core.utils import ChromeType
+except Exception:
+    try:
+        from webdriver_manager.chrome import ChromeType
+    except Exception:
+        from webdriver_manager.utils import ChromeType
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -38,7 +44,7 @@ class GGPokerScraper:
         # Initialize database manager
         self.db_manager = DatabaseManager()
         print("✅ Database manager initialized")
-    
+
     def setup_driver(self):
         """Set up the Chrome WebDriver with appropriate options"""
         chrome_options = Options()
@@ -57,17 +63,6 @@ class GGPokerScraper:
         if chrome_bin:
             chrome_options.binary_location = chrome_bin
 
-        # if not self.headless:
-        #     # Make browser visible so you can follow along
-        #     chrome_options.add_argument("--start-maximized")
-        #     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        #     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        #     chrome_options.add_experimental_option('useAutomationExtension', False)
-        # else:
-        #     chrome_options.add_argument("--headless")
-        #     chrome_options.add_argument("--no-sandbox")
-        #     chrome_options.add_argument("--disable-dev-shm-usage")
-        
         # Install and setup ChromeDriver automatically, but allow a fixed binary path
         chromedriver_bin = os.getenv("CHROME_DRIVER_BIN")
         if chromedriver_bin and os.path.exists(chromedriver_bin):
@@ -87,7 +82,7 @@ class GGPokerScraper:
         except Exception as e:
             print(f"❌ Error setting up WebDriver: {e}")
             raise
-    
+
     def access_ggpoker_page(self):
         """Access the GGPoker Omaha Daily Leaderboard page"""
         url = "https://ggpoker.com/promotions/omaha-daily-leaderboard/"
@@ -110,7 +105,7 @@ class GGPokerScraper:
         except Exception as e:
             print(f"❌ Error accessing page: {e}")
             return False
-    
+
     def find_plo_section(self):
         """Find the PLO section with the iframe"""
         try:
@@ -137,7 +132,7 @@ class GGPokerScraper:
         except Exception as e:
             print(f"❌ Error finding PLO section: {e}")
             return None, None
-    
+
     def click_iframe_link(self, iframe):
         """Click on the iframe to interact with it"""
         try:
@@ -159,7 +154,7 @@ class GGPokerScraper:
         except Exception as e:
             print(f"❌ Error clicking iframe: {e}")
             return False
-    
+
     def explore_iframe_content(self, iframe_src):
         """Explore the iframe content by navigating to its source URL"""
         try:
@@ -181,7 +176,7 @@ class GGPokerScraper:
         except Exception as e:
             print(f"❌ Error exploring iframe content: {e}")
             return False
-    
+
     def get_blind_levels_from_dropdown(self):
         """Find the dropdown-layer class and extract all blind level text from list elements"""
         try:
@@ -201,28 +196,12 @@ class GGPokerScraper:
             list_elements = dropdown.find_elements(By.TAG_NAME, "li")
             print(f"📋 Found {len(list_elements)} list elements in dropdown")
             
-            # # Extract text from each list element using textContent
-            # blind_levels = []
-            # for i, li in enumerate(list_elements, 1):
-            #     text = li.get_attribute('textContent').strip() if li.get_attribute('textContent') else ''
-                
-            #     if text:  # Only add non-empty text
-            #         blind_levels.append(text)
-            #         print(f"  {i}. {text}")
-            #     else:
-            #         print(f"  ⚠️ No text found for element {i}")
-            
-            # print(f"\n✅ Extracted {len(blind_levels)} blind levels:")
-            # print("📊 Blind Levels List:")
-            # for i, level in enumerate(blind_levels, 1):
-            #     print(f"   {i}. {level}")
-            
             return list_elements
             
         except Exception as e:
             print(f"❌ Error extracting blind levels from dropdown: {e}")
             return []
-    
+
     def click_through_blind_levels(self, list_elements):
         """Click through all blind level options to make them clickable"""
         try:
@@ -262,17 +241,7 @@ class GGPokerScraper:
                         time.sleep(5)
 
                         # Now extract player ranking data from the table
-                        # print(f"  🔍 Looking for player ranking data...")
                         self.extract_player_ranking_data(text_content)
-                        
-                        # if player_data:
-                        #     print(f"  📊 Found {len(player_data)} player entries:")
-                        #     for j, (name, points) in enumerate(player_data, 1):
-                        #         print(f"    {j}. {name}: {points}")
-                        # else:
-                        #     print(f"  ⚠️ No player data found")
-                        
-                        # print(f"  ⏳ Waiting for next instruction...")
                         
                     else:
                         print(f"  ⚠️ Dropdown did not get 'layer-open' class")
@@ -291,7 +260,7 @@ class GGPokerScraper:
         except Exception as e:
             print(f"❌ Error during blind level iteration: {e}")
             return False
-    
+
     def extract_player_ranking_data(self, text_content, game='PLO'):
         """Extract player name and points from the ranking table and store in database"""
         try:
@@ -337,7 +306,6 @@ class GGPokerScraper:
                         if player_name and points:  # Only add if both values exist
                             # Store player data in database
                             self.db_manager.update_player_points(table_name, player_name, timestamp, points)
-                            # print(f"      📝 {player_name} - {points}")
                         else:
                             print(f"      ⚠️ Row {i}: Missing name or points")
                     else:
@@ -355,7 +323,7 @@ class GGPokerScraper:
         except Exception as e:
             print(f"    ❌ Error extracting player ranking data: {e}")
             return []
-    
+
     def run_scraping_session(self):
         """Run the complete scraping session"""
         try:
@@ -416,6 +384,7 @@ class GGPokerScraper:
         
         if hasattr(self, 'db_manager'):
             self.db_manager.close()
+
 
 def main():
     """Main function to run the scraper"""
