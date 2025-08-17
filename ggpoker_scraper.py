@@ -16,10 +16,11 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 import os
-try:
-    from webdriver_manager.core.utils import ChromeType
-except ImportError:
-    from webdriver_manager.chrome import ChromeType
+from webdriver_manager.core.utils import ChromeType
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class GGPokerScraper:
     def __init__(self, headless=False):

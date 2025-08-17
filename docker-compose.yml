@@ -6,7 +6,7 @@ services:
     container_name: gg_scraper
     environment:
       - INTERVAL=600
-      - MAX_TS_COLUMNS=12500
+      - MAX_TS_COLUMNS=8000
       - DB_PATH=/data/ggpoker_leaderboards.db
       - CHROME_BIN=/usr/bin/chromium
       - CHROME_TYPE=chromium
