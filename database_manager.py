@@ -17,7 +17,7 @@ class DatabaseManager:
         # Check if we're in cloud (Railway/Render) or local
         self.database_url = os.getenv('DATABASE_URL')
         
-        if self.database_url and self.database_url.startswith('postgres://'):
+        if self.database_url and (self.database_url.startswith('postgres://') or self.database_url.startswith('postgresql://')):
             # Cloud environment - use PostgreSQL
             self.use_postgres = True
             self.init_postgres()
@@ -277,6 +277,7 @@ class DatabaseManager:
             if self.use_postgres:
                 self._update_postgres_player_points(table_name, player, safe_column_name, points)
             else:
+                
                 self._update_sqlite_player_points(table_name, player, safe_column_name, points)
         except Exception as e:
             print(f"❌ Error updating player points: {e}")
@@ -321,11 +322,13 @@ class DatabaseManager:
         
         if player_exists:
             # Update existing player
+          
             cursor.execute(f"""
                 UPDATE "{table_name}" 
-                SET "{column_name}" = %s 
-                WHERE player = %s
+                SET "{column_name}" = ? 
+                WHERE player = ?
             """, (points, player))
+           
         else:
             # Create new player record
             cursor.execute(f"""
@@ -335,7 +338,80 @@ class DatabaseManager:
         
         self.connection.commit()
     
-    # ... rest of your existing methods with PostgreSQL equivalents ...
+    # --- Name sanitizers (restored) ---
+    def _sanitize_table_name(self, name: str) -> str:
+        """Sanitize table name for SQLite/PostgreSQL compatibility"""
+        sanitized = re.sub(r'[^a-zA-Z0-9_\s-]', '', name)
+        sanitized = sanitized.replace(' ', '_').replace('-', '_')
+        sanitized = sanitized.replace('$', 'dollar').replace('.', 'dot')
+        return sanitized
+
+    def _sanitize_column_name(self, timestamp: str) -> str:
+        """Sanitize timestamp for use as a column name"""
+        sanitized = timestamp.replace(' ', '_').replace(':', 'h').replace('-', '_')
+        sanitized = f"ts_{sanitized}"
+        return sanitized
+
+    # --- Timestamp pruning helpers ---
+    def _get_sqlite_timestamp_columns(self, table_name: str) -> List[str]:
+        cursor = self.connection.cursor()
+        cursor.execute(f"PRAGMA table_info('{table_name}')")
+        all_columns = [col[1] for col in cursor.fetchall()]
+        ts_columns = [c for c in all_columns if c.startswith("ts_")]
+        ts_columns.sort()
+        return ts_columns
+
+    def _prune_sqlite_timestamp_columns(self, table_name: str, max_columns: int):
+        try:
+            ts_columns = self._get_sqlite_timestamp_columns(table_name)
+            if len(ts_columns) <= max_columns:
+                return
+            to_drop = len(ts_columns) - max_columns
+            columns_to_drop = ts_columns[:to_drop]
+            cursor = self.connection.cursor()
+            for col in columns_to_drop:
+                try:
+                    cursor.execute(f"ALTER TABLE \"{table_name}\" DROP COLUMN \"{col}\"")
+                    print(f"    🗑️ Dropped old column: {col}")
+                except Exception as drop_err:
+                    print(f"    ⚠️ Could not drop column {col}: {drop_err}")
+                    break
+            self.connection.commit()
+        except Exception as e:
+            print(f"    ⚠️ Error during pruning timestamp columns (SQLite): {e}")
+
+    def _get_postgres_timestamp_columns(self, table_name: str) -> List[str]:
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = %s AND column_name LIKE 'ts_%'
+            ORDER BY column_name ASC
+            """,
+            (table_name,),
+        )
+        rows = cursor.fetchall()
+        return [r[0] for r in rows]
+
+    def _prune_postgres_timestamp_columns(self, table_name: str, max_columns: int):
+        try:
+            ts_columns = self._get_postgres_timestamp_columns(table_name)
+            if len(ts_columns) <= max_columns:
+                return
+            to_drop = len(ts_columns) - max_columns
+            columns_to_drop = ts_columns[:to_drop]
+            cursor = self.connection.cursor()
+            for col in columns_to_drop:
+                try:
+                    cursor.execute(f"ALTER TABLE \"{table_name}\" DROP COLUMN \"{col}\"")
+                    print(f"    🗑️ Dropped old column: {col}")
+                except Exception as drop_err:
+                    print(f"    ⚠️ Could not drop column {col}: {drop_err}")
+                    break
+            self.connection.commit()
+        except Exception as e:
+            print(f"    ⚠️ Error during pruning timestamp columns (PostgreSQL): {e}")
     
     def close(self):
         """Close database connection"""
