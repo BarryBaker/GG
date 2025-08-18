@@ -34,7 +34,7 @@ ENV CHROME_BIN=/usr/bin/chromium \
 
 # Persistent data directory for SQLite
 RUN mkdir -p /data
-VOLUME ["/data"]
+
 
 # Run continuously with interval
 CMD ["/bin/sh", "-c", "python ggpoker_scraper.py --interval ${INTERVAL}"]
