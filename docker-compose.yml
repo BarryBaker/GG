@@ -13,3 +13,18 @@ services:
     volumes:
       - ./data:/data
     restart: unless-stopped
+
+  api:
+    build: .
+    image: gg-api:latest
+    container_name: gg_api
+    command: python api.py
+    environment:
+      # Prefer private DB URL if available; fallback to DATABASE_URL or public
+      - DATABASE_PRIVATE_URL=${DATABASE_PRIVATE_URL}
+      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_PUBLIC_URL=${DATABASE_PUBLIC_URL}
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
