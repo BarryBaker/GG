@@ -214,28 +214,20 @@ class DatabaseManager:
     def _add_postgres_timestamp_column(self, table_name: str, column_name: str) -> bool:
         """Add timestamp column to PostgreSQL table"""
         cursor = self.connection.cursor()
-        print(1111)
-        # Check if column exists
-        cursor.execute("""
-            SELECT column_name FROM information_schema.columns 
-            WHERE table_name = %s AND column_name = %s
-        """, (table_name, column_name))
-        print(2222)
-        column_exists = cursor.fetchone() is not None
-        print(3333)
-        if column_exists:
-            print(f"    ⚠️ Column {column_name} already exists in {table_name}")
-            return True
-        print(4444)
-        # Add new column
-        cursor.execute(f"""
-            ALTER TABLE "{table_name}" 
-            ADD COLUMN "{column_name}" TEXT DEFAULT '0'
-        """)
-        print(5555)
-        
+
+        # Add column idempotently without backfilling existing rows (metadata-only)
+        # 1) Add column without default (fast)
+        cursor.execute(
+            f"ALTER TABLE \"{table_name}\" ADD COLUMN IF NOT EXISTS \"{column_name}\" TEXT"
+        )
+        # 2) Set default for future inserts only (metadata-only)
+        cursor.execute(
+            f"ALTER TABLE \"{table_name}\" ALTER COLUMN \"{column_name}\" SET DEFAULT %s",
+            ("0",),
+        )
+
         self.connection.commit()
-        print(f"    ✅ Added new PostgreSQL column: {column_name}")
+        print(f"    ✅ Ensured PostgreSQL column exists with default: {column_name}")
         
         # Prune old columns if needed
         if self.max_ts_columns and self.max_ts_columns > 0:
@@ -286,28 +278,18 @@ class DatabaseManager:
     def _update_postgres_player_points(self, table_name: str, player: str, column_name: str, points: str):
         """Update player points in PostgreSQL"""
         cursor = self.connection.cursor()
-        
-        # Check if player exists
-        cursor.execute(f"""
-            SELECT player FROM "{table_name}" WHERE player = %s
-        """, (player,))
-        
-        player_exists = cursor.fetchone() is not None
-        
-        if player_exists:
-            # Update existing player
-            cursor.execute(f"""
-                UPDATE "{table_name}" 
-                SET "{column_name}" = %s 
-                WHERE player = %s
-            """, (points, player))
-        else:
-            # Create new player record
-            cursor.execute(f"""
-                INSERT INTO "{table_name}" (player, "{column_name}")
-                VALUES (%s, %s)
-            """, (player, points))
-        
+
+        # Use single upsert to avoid extra round-trips and improve performance
+        cursor.execute(
+            f"""
+            INSERT INTO "{table_name}" (player, "{column_name}")
+            VALUES (%s, %s)
+            ON CONFLICT (player)
+            DO UPDATE SET "{column_name}" = EXCLUDED."{column_name}"
+            """,
+            (player, points),
+        )
+
         self.connection.commit()
     
     def _update_sqlite_player_points(self, table_name: str, player: str, column_name: str, points: str):
