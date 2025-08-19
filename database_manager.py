@@ -219,7 +219,7 @@ class DatabaseManager:
         # 1) Add column without default (fast)
         print(1111)
         cursor.execute(
-            f"ALTER TABLE \"{table_name}\" ADD COLUMN IF NOT EXISTS \"{column_name}\" TEXT"
+            f"ALTER TABLE \"{table_name}\" ADD COLUMN  \"{column_name}\" TEXT"
         )
         # 2) Set default for future inserts only (metadata-only)
         print(2222)
