@@ -36,7 +36,5 @@ ENV CHROME_BIN=/usr/bin/chromium \
 RUN mkdir -p /data
 
 
-# Default command serves FastAPI if FRONTEND_SERVICE is set; otherwise run scraper
-ENV FRONTEND_SERVICE=false
-
-CMD ["/bin/sh", "-c", "if [ \"$FRONTEND_SERVICE\" = \"true\" ]; then uvicorn api:app --host 0.0.0.0 --port 8000; else python ggpoker_scraper.py --interval ${INTERVAL}; fi"]
+# Run continuously with interval
+CMD ["/bin/sh", "-c", "python ggpoker_scraper.py --interval ${INTERVAL}"]
