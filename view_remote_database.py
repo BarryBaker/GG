@@ -157,7 +157,7 @@ class RemoteDatabaseViewer:
 
             if order_column:
                 # Remove commas before casting to REAL for correct numeric sorting (e.g., "1,181.00" -> 1181.00)
-                query = f"SELECT {select_clause} FROM \"{table_name}\" ORDER BY CAST(REPLACE(\"{order_column}\", ',', '') AS REAL) DESC LIMIT %s"
+                query = f"SELECT {select_clause} FROM \"{table_name}\" ORDER BY CAST(NULLIF(regexp_replace(\"{order_column}\", '[^0-9.-]', '', 'g'), '') AS double precision) DESC NULLS LAST LIMIT %s"
             else:
                 # If no obvious ordering column, just get last 10 rows
                 query = f"SELECT {select_clause} FROM \"{table_name}\" LIMIT %s"
