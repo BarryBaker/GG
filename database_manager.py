@@ -215,30 +215,19 @@ class DatabaseManager:
         """Add timestamp column to PostgreSQL table"""
         cursor = self.connection.cursor()
 
-        # First, check if the column already exists to avoid taking an AccessExclusive lock
+        # Add column idempotently without backfilling existing rows (metadata-only)
+        # 1) Add column without default (fast)
         cursor.execute(
-            """
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = %s AND column_name = %s
-            """,
-            (table_name, column_name),
+            f"ALTER TABLE \"{table_name}\" ADD COLUMN IF NOT EXISTS \"{column_name}\" TEXT"
         )
-        if cursor.fetchone() is not None:
-            print(f"    ⚠️ Column {column_name} already exists in {table_name}")
-            return True
+        # 2) Set default for future inserts only (metadata-only)
+        cursor.execute(
+            f"ALTER TABLE \"{table_name}\" ALTER COLUMN \"{column_name}\" SET DEFAULT %s",
+            ("0",),
+        )
 
-        # Try to add the column quickly; set a short lock timeout to avoid long waits
-        try:
-            cursor.execute("SET LOCAL lock_timeout = '2s'")
-            cursor.execute(
-                f"ALTER TABLE \"{table_name}\" ADD COLUMN \"{column_name}\" TEXT"
-            )
-            self.connection.commit()
-            print(f"    ✅ Added new PostgreSQL column: {column_name}")
-        except Exception as e:
-            self.connection.rollback()
-            print(f"    ⚠️ Skipped adding column due to lock timeout or error: {e}")
-            return False
+        self.connection.commit()
+        print(f"    ✅ Ensured PostgreSQL column exists with default: {column_name}")
         
         # Prune old columns if needed
         if self.max_ts_columns and self.max_ts_columns > 0:
@@ -301,7 +290,7 @@ class DatabaseManager:
             (player, points),
         )
 
-        # Commit is deferred to caller to allow batching
+        self.connection.commit()
     
     def _update_sqlite_player_points(self, table_name: str, player: str, column_name: str, points: str):
         """Update player points in SQLite (your existing code)"""
@@ -330,25 +319,7 @@ class DatabaseManager:
                 VALUES (?, ?)
             """, (player, points))
         
-        # Commit is deferred to caller to allow batching
-
-    def commit_changes(self):
-        """Commit current transaction (for batching updates)."""
-        try:
-            if hasattr(self, 'connection') and self.connection:
-                self.connection.commit()
-        except Exception as e:
-            print(f"⚠️ Commit failed: {e}")
-            raise
-
-    def rollback_changes(self):
-        """Rollback current transaction (on errors)."""
-        try:
-            if hasattr(self, 'connection') and self.connection:
-                self.connection.rollback()
-        except Exception as e:
-            print(f"⚠️ Rollback failed: {e}")
-            raise
+        self.connection.commit()
     
     # --- Name sanitizers (restored) ---
     def _sanitize_table_name(self, name: str) -> str:

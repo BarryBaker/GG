@@ -290,34 +290,32 @@ class GGPokerScraper:
             # Add timestamp column to the table
             self.db_manager.add_timestamp_column(table_name, timestamp)
             
-            # Process each player row in a single transaction for performance
-            try:
-                # Disable autocommit if enabled, to batch all updates
-                if hasattr(self.db_manager, 'connection') and getattr(self.db_manager.connection, 'autocommit', False):
-                    self.db_manager.connection.autocommit = False
-
-                for i, tr in enumerate(tr_elements, 1):
-                    try:
-                        td_elements = tr.find_elements(By.TAG_NAME, "td")
-                        if len(td_elements) >= 4:
-                            player_name = td_elements[1].get_attribute('textContent').strip() if td_elements[1].get_attribute('textContent') else ''
-                            points = td_elements[3].get_attribute('textContent').strip() if td_elements[3].get_attribute('textContent') else ''
-                            if player_name and points:
-                                self.db_manager.update_player_points(table_name, player_name, timestamp, points)
-                            else:
-                                print(f"      ⚠️ Row {i}: Missing name or points")
+            # Process each player row
+            for i, tr in enumerate(tr_elements, 1):
+                try:
+                    # Find all td tags in this row
+                    td_elements = tr.find_elements(By.TAG_NAME, "td")
+                    
+                    if len(td_elements) >= 4:  # Make sure we have at least 4 td elements
+                        # Get player name from 2nd td (index 1)
+                        player_name = td_elements[1].get_attribute('textContent').strip() if td_elements[1].get_attribute('textContent') else ''
+                        
+                        # Get points from 4th td (index 3)
+                        points = td_elements[3].get_attribute('textContent').strip() if td_elements[3].get_attribute('textContent') else ''
+                        
+                        if player_name and points:  # Only add if both values exist
+                            # Store player data in database
+                            self.db_manager.update_player_points(table_name, player_name, timestamp, points)
                         else:
-                            print(f"      ⚠️ Row {i}: Not enough td elements ({len(td_elements)})")
-                    except Exception as e:
-                        print(f"      ❌ Error processing row {i}: {e}")
-                        continue
-
-                # Commit batched updates once
-                self.db_manager.commit_changes()
-                print(f"    ✅ Successfully processed {len(tr_elements)} player entries")
-            except Exception as batch_err:
-                print(f"    ❌ Batch update failed: {batch_err}")
-                self.db_manager.rollback_changes()
+                            print(f"      ⚠️ Row {i}: Missing name or points")
+                    else:
+                        print(f"      ⚠️ Row {i}: Not enough td elements ({len(td_elements)})")
+                        
+                except Exception as e:
+                    print(f"      ❌ Error processing row {i}: {e}")
+                    continue
+            
+            print(f"    ✅ Successfully processed {len(tr_elements)} player entries")
             
         except Exception as e:
             print(f"    ❌ Error extracting player ranking data: {e}")
