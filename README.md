@@ -77,6 +77,32 @@ Use the included viewer script:
 python view_database.py
 ```
 
+### Remote viewer and web API
+
+Run the remote Postgres viewer (CLI):
+```bash
+python view_remote_database.py
+```
+
+Run the FastAPI web API locally:
+```bash
+export DATABASE_URL=postgresql://username:password@host:port/db
+uvicorn api:app --reload
+```
+
+Docker (web):
+```bash
+docker build -t gg-web -f Dockerfile.web .
+docker run -e DATABASE_URL=$DATABASE_URL -p 8000:8000 gg-web
+```
+
+Railway deployment:
+- Create a new Railway service from this repo.
+- Select Docker and set Dockerfile to `Dockerfile.web`.
+- Set env: `DATABASE_URL` with your Postgres URL.
+- Start command auto-detected from Dockerfile (`uvicorn api:app --host 0.0.0.0 --port 8000`).
+- Optional: add another service for the scraper from `Dockerfile` with start command `python ggpoker_scraper.py --interval 600`.
+
 ## Run Continuously in Docker
 
 Build and run with Docker Compose (persists the SQLite DB under `./data`):

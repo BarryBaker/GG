@@ -1,0 +1,22 @@
+{
+  "build": {
+    "builder": "NIXPACKS",
+    "nixpacksPlan": {
+      "phases": {
+        "install-frontend": {
+          "dependsOn": ["install"],
+          "cmds": [
+            "cd frontend && npm ci && npm run build"
+          ]
+        }
+      }
+    }
+  },
+  "deploy": {
+    "startCommand": "uvicorn api:app --host 0.0.0.0 --port 8000",
+    "numReplicas": 1,
+    "healthcheckPath": "/api/last_update"
+  }
+}
+
+
