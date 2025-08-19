@@ -1,0 +1,17 @@
+# Railway PostgreSQL Database Connection
+# Copy this file to .env and fill in your actual Railway database URL
+DATABASE_URL=postgresql://postgres:QZmLYJhynbQguHwfZyfDzCOrhxxSzBZv@mainline.proxy.rlwy.net:19069/railway
+
+# Example format:
+# DATABASE_URL=postgresql://postgres:password123@containers-us-west-123.railway.app:5432/railway
+
+# Get this URL from your Railway project dashboard:
+# 1. Go to your Railway project
+# 2. Click on your PostgreSQL service
+# 3. Go to "Connect" tab
+# 4. Copy the "Postgres Connection URL"
+
+# To use this template:
+# 1. Copy this file to .env
+# 2. Replace the placeholder with your actual Railway database URL
+# 3. Run: python view_remote_database.py

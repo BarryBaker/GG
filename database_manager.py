@@ -214,24 +214,25 @@ class DatabaseManager:
     def _add_postgres_timestamp_column(self, table_name: str, column_name: str) -> bool:
         """Add timestamp column to PostgreSQL table"""
         cursor = self.connection.cursor()
-        
+        print(1111)
         # Check if column exists
         cursor.execute("""
             SELECT column_name FROM information_schema.columns 
             WHERE table_name = %s AND column_name = %s
         """, (table_name, column_name))
-        
+        print(2222)
         column_exists = cursor.fetchone() is not None
-        
+        print(3333)
         if column_exists:
             print(f"    ⚠️ Column {column_name} already exists in {table_name}")
             return True
-        
+        print(4444)
         # Add new column
         cursor.execute(f"""
             ALTER TABLE "{table_name}" 
             ADD COLUMN "{column_name}" TEXT DEFAULT '0'
         """)
+        print(5555)
         
         self.connection.commit()
         print(f"    ✅ Added new PostgreSQL column: {column_name}")
