@@ -168,6 +168,10 @@ def api_table_data(table: str):
     try:
         limit = int(request.args.get("limit", 50))
         last_cols = int(request.args.get("last_columns", 10))
+        # If no limit or last_columns is specified, return the full table with all columns by default
+        if "limit" not in request.args and "last_columns" not in request.args:
+            limit = 0  # 0 or None means no limit
+            last_cols = 0  # 0 or None means all columns
         payload = fetch_table_data(table, limit=limit, last_columns=last_cols)
         return jsonify(payload)
     except Exception as e:
