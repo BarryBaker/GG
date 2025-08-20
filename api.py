@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Simple HTTP API to expose PostgreSQL tables for a frontend application.
+HTTP API for listing and reading tables similarly to the viewer.
 
 Endpoints:
-  GET  /health                         → { status: ok }
-  GET  /tables                         → ["table_a", "table_b", ...]
-  GET  /tables/<table>/columns         → [{ name, data_type, is_nullable, default, position }, ...]
-  GET  /tables/<table>/data            → { columns: [...], rows: [...] }
-      Query params:
-        - limit: int (default 50)
-        - last_columns: int (default 10) → first column + last N columns (no duplicates)
+  GET  /health                                  → { status: ok }
+  GET  /tables?prefix=PLO                       → ["PLO_...", ...]
+  GET  /tables/<table>/columns                  → column metadata
+  GET  /tables/<table>/data?last_columns=10&limit=10
+      → first column + last N columns, sorted by the last column DESC with NULLS LAST,
+        returns up to 'limit' rows (defaults: last_columns=10, limit=10)
 
 Notes:
   - Prefers DATABASE_PRIVATE_URL, then DATABASE_URL, then DATABASE_PUBLIC_URL
-  - Avoids holding long transactions (autocommit connection per request)
-  - Uses NULLS LAST ordering on the last selected column, parsing numbers from strings
-  - CORS enabled for browser clients
+  - Uses short-lived autocommit connections to avoid long-held locks
+  - Sorting uses numeric parsing with NULLS LAST for robust ordering
+  - CORS enabled
 """
 
 import os
@@ -57,16 +56,19 @@ def open_connection():
     return conn
 
 
-def list_tables() -> List[str]:
+def list_tables(prefix: str = "PLO") -> List[str]:
+    """List public tables whose names start with the given prefix (default 'PLO')."""
+    like_pattern = f"{prefix}%"
     with open_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT table_name
                 FROM information_schema.tables
-                WHERE table_schema = 'public'
+                WHERE table_schema = 'public' AND table_name LIKE %s
                 ORDER BY table_name
-                """
+                """,
+                (like_pattern,),
             )
             return [r[0] for r in cur.fetchall()]
 
@@ -121,10 +123,14 @@ def fetch_table_data(table_name: str, limit: int, last_columns: int) -> Dict[str
             tbl_ident = sql.Identifier(table_name)
             order_ident = sql.Identifier(order_col)
 
-            # ORDER BY: remove non-numeric chars, treat empty as NULL, cast to double, DESC NULLS LAST
+            # ORDER BY: robust numeric sort; non-numeric treated as NULLs → placed last
+            cleaned = sql.SQL("regexp_replace({col}, '[^0-9.-]', '', 'g')").format(col=order_ident)
+            numeric_when = sql.SQL("({clean}) ~ '^-?\\d*\\.?\\d+$'").format(clean=cleaned)
+            # Yes, this code takes into account that the ordering column values are numbers represented as text.
+            # It tries to parse the column as a number for sorting, otherwise treats as NULL (sorted last).
             order_expr = sql.SQL(
-                "CAST(NULLIF(regexp_replace({col}, '[^0-9.-]', '', 'g'), '') AS double precision) DESC NULLS LAST"
-            ).format(col=order_ident)
+                "CASE WHEN {when} THEN CAST({clean} AS double precision) ELSE NULL END DESC NULLS LAST"
+            ).format(when=numeric_when, clean=cleaned)
 
             query = sql.SQL("SELECT {cols} FROM {tbl} ORDER BY {ord} LIMIT %s").format(
                 cols=sql.SQL(", ").join(select_idents),
@@ -150,7 +156,8 @@ def health():
 @app.get("/tables")
 def api_tables():
     try:
-        return jsonify(list_tables())
+        prefix = request.args.get("prefix", "PLO")
+        return jsonify(list_tables(prefix=prefix))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -166,13 +173,9 @@ def api_table_columns(table: str):
 @app.get("/tables/<table>/data")
 def api_table_data(table: str):
     try:
-        limit = int(request.args.get("limit", 50))
+        # Defaults: last_columns=10, limit=10
+        limit = int(request.args.get("limit", 10))
         last_cols = int(request.args.get("last_columns", 10))
-        # If no limit or last_columns is specified, return the full table with all columns by default
-        if "limit" not in request.args and "last_columns" not in request.args:
-            limit = None  # None means no limit
-            last_cols = None  # None means all columns
-        
         payload = fetch_table_data(table, limit=limit, last_columns=last_cols)
         return jsonify(payload)
     except Exception as e:
