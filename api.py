@@ -182,6 +182,47 @@ def api_table_data(table: str):
         return jsonify({"error": str(e)}), 500
 
 
+def fetch_player_data(table_name: str, player_name: str) -> Dict[str, List]:
+    """Return all columns for rows matching the player in the first column."""
+    # Determine columns and first-column name (assumed to be the player identifier)
+    columns_info = list_columns(table_name)
+    column_names = [c["name"] for c in columns_info]
+    if not column_names:
+        return {"columns": [], "rows": []}
+
+    first_col = column_names[0]
+
+    with open_connection() as conn:
+        with conn.cursor() as cur:
+            select_idents = [sql.Identifier(c) for c in column_names]
+            tbl_ident = sql.Identifier(table_name)
+            first_ident = sql.Identifier(first_col)
+
+            query = sql.SQL("SELECT {cols} FROM {tbl} WHERE {first} = %s").format(
+                cols=sql.SQL(", ").join(select_idents),
+                tbl=tbl_ident,
+                first=first_ident,
+            )
+
+            cur.execute(query, (player_name,))
+            rows = cur.fetchall()
+
+    return {"columns": column_names, "rows": rows}
+
+
+@app.get("/tables/<table>/player")
+def api_table_player(table: str):
+    try:
+        name = request.args.get("name")
+        if not name:
+            return jsonify({"error": "Missing required query parameter 'name'"}), 400
+
+        payload = fetch_player_data(table, player_name=name)
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     app.run(host="0.0.0.0", port=port)
