@@ -174,8 +174,8 @@ def api_table_columns(table: str):
 def api_table_data(table: str):
     try:
         # Defaults: last_columns=10, limit=10
-        limit = int(request.args.get("limit", 40))
-        last_cols = int(request.args.get("last_columns", 20))
+        limit = int(request.args.get("limit", 15))
+        last_cols = int(request.args.get("last_columns", 15))
         payload = fetch_table_data(table, limit=limit, last_columns=last_cols)
         return jsonify(payload)
     except Exception as e:
