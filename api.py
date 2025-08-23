@@ -210,13 +210,13 @@ def fetch_player_data(table_name: str, player_name: str) -> Dict[str, List]:
     return {"columns": column_names, "rows": rows}
 
 
-def fetch_top_players(table_name: str, limit: int = 10) -> Dict[str, List]:
-    """Return top players sorted by sum of all numeric columns (excluding first column)."""
+def fetch_top_players(table_name: str, limit: int = 50) -> List[str]:
+    """Return list of top player names sorted by sum of all numeric columns (excluding first column)."""
     # Get column info
     columns_info = list_columns(table_name)
     column_names = [c["name"] for c in columns_info]
     if not column_names:
-        return {"columns": [], "rows": []}
+        return []
 
     first_col = column_names[0]
     # Skip first column (player name) and only sum numeric columns
@@ -233,36 +233,27 @@ def fetch_top_players(table_name: str, limit: int = 10) -> Dict[str, List]:
                     .format(col=sql.Identifier(col))
                 )
             
-            # Build the query: SELECT player, SUM(all_numeric_cols) as total, all_original_cols
-            select_cols = [sql.Identifier(first_col)]
-            select_cols.append(sql.SQL("SUM({sum_expr}) as total").format(
-                sum_expr=sql.SQL(" + ").join(sum_parts)
-            ))
-            # Add all original columns
-            for col in column_names:
-                select_cols.append(sql.Identifier(col))
-            
+            # Build the query: SELECT player, SUM(all_numeric_cols) as total
             tbl_ident = sql.Identifier(table_name)
+            first_ident = sql.Identifier(first_col)
             
             query = sql.SQL("""
-                SELECT {cols} 
+                SELECT {player_col}, SUM({sum_expr}) as total
                 FROM {tbl} 
-                GROUP BY {group_cols}
+                GROUP BY {player_col}
                 ORDER BY total DESC 
                 LIMIT %s
             """).format(
-                cols=sql.SQL(", ").join(select_cols),
-                tbl=tbl_ident,
-                group_cols=sql.SQL(", ").join([sql.Identifier(c) for c in column_names])
+                player_col=first_ident,
+                sum_expr=sql.SQL(" + ").join(sum_parts),
+                tbl=tbl_ident
             )
             
             cur.execute(query, (limit,))
             rows = cur.fetchall()
             
-            # Update column names to include the total column
-            result_columns = [first_col, "total"] + column_names
-
-    return {"columns": result_columns, "rows": rows}
+            # Return just the player names
+            return [row[0] for row in rows]
 
 
 @app.get("/tables/<table>/player")
@@ -281,9 +272,9 @@ def api_table_player(table: str):
 @app.get("/tables/<table>/top-players")
 def api_top_players(table: str):
     try:
-        limit = int(request.args.get("limit", 10))
-        payload = fetch_top_players(table, limit=limit)
-        return jsonify(payload)
+        limit = int(request.args.get("limit", 50))
+        player_names = fetch_top_players(table, limit=limit)
+        return jsonify(player_names)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
