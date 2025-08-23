@@ -220,7 +220,7 @@ def fetch_top_players(table_name: str, limit: int = 50) -> List[str]:
 
     first_col = column_names[0]
     # Skip first column (player name) and only sum numeric columns
-    numeric_cols = column_names[1:]
+    numeric_cols = column_names[2:]
 
     with open_connection() as conn:
         with conn.cursor() as cur:
