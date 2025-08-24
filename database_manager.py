@@ -29,11 +29,6 @@ class DatabaseManager:
             self.init_sqlite()
             print("💻 Using SQLite (local)")
         
-        # Optional cap on timestamp columns
-        try:
-            self.max_ts_columns = int(os.getenv("MAX_TS_COLUMNS", "0"))
-        except ValueError:
-            self.max_ts_columns = 0
     
     def init_postgres(self):
         """Initialize PostgreSQL connection"""
@@ -79,7 +74,7 @@ class DatabaseManager:
         try:
             cursor = self.connection.cursor()
             
-            # Create leaderboard_tables tracking table
+            # Legacy tracking table (kept for compatibility)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS leaderboard_tables (
                     table_name TEXT PRIMARY KEY,
@@ -89,6 +84,38 @@ class DatabaseManager:
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Normalized schema (new)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS leaderboards (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS players (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    country TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS update_batch (
+                    id BIGSERIAL PRIMARY KEY,
+                    ts TIMESTAMPTZ NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS facts (
+                    leaderboard_id INT NOT NULL REFERENCES leaderboards(id) ON DELETE CASCADE,
+                    update_id BIGINT NOT NULL REFERENCES update_batch(id) ON DELETE CASCADE,
+                    player_id INT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                    points NUMERIC NOT NULL,
+                    PRIMARY KEY (leaderboard_id, player_id, update_id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_facts_lb_update ON facts (leaderboard_id, update_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_facts_lb_player_update ON facts (leaderboard_id, player_id, update_id)")
             
             self.connection.commit()
             print("✅ PostgreSQL tables created")
@@ -101,228 +128,166 @@ class DatabaseManager:
         """Create SQLite tables (your existing code)"""
         try:
             cursor = self.connection.cursor()
+          
+            
+            # Normalized schema (new)
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS leaderboard_tables (
-                    table_name TEXT PRIMARY KEY,
-                    game_type TEXT NOT NULL,
-                    blind_level TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                CREATE TABLE IF NOT EXISTS leaderboards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS players (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    country TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS update_batch (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS facts (
+                    leaderboard_id INTEGER NOT NULL,
+                    update_id INTEGER NOT NULL,
+                    player_id INTEGER NOT NULL,
+                    points REAL NOT NULL,
+                    PRIMARY KEY (leaderboard_id, player_id, update_id),
+                    FOREIGN KEY (leaderboard_id) REFERENCES leaderboards(id) ON DELETE CASCADE,
+                    FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE,
+                    FOREIGN KEY (update_id) REFERENCES update_batch(id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_facts_lb_update ON facts (leaderboard_id, update_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_facts_lb_player_update ON facts (leaderboard_id, player_id, update_id)")
+            
             self.connection.commit()
             print("✅ SQLite tables created")
         except Exception as e:
             print(f"❌ Error creating SQLite tables: {e}")
             raise
+
+    # ---- Normalized helpers (generic wrappers) ----
+    def get_or_create_leaderboard_id(self, name: str) -> int:
+        if self.use_postgres:
+            return self._get_or_create_leaderboard_id_pg(name)
+        # SQLite path (existing behavior)
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT id FROM leaderboards WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        cursor.execute("INSERT INTO leaderboards (name) VALUES (?)", (name,))
+        self.connection.commit()
+        return cursor.lastrowid
+
+    def get_or_create_player_id(self, name: str, country: Optional[str]) -> int:
+        if self.use_postgres:
+            return self._get_or_create_player_id_pg(name, country)
+        # SQLite path
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT id, country FROM players WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        if row:
+            player_id, existing_country = row
+            if (not existing_country) and country:
+                cursor.execute("UPDATE players SET country = ? WHERE id = ?", (country, player_id))
+                self.connection.commit()
+            return player_id
+        cursor.execute("INSERT INTO players (name, country) VALUES (?, ?)", (name, country))
+        self.connection.commit()
+        return cursor.lastrowid
+
+    def create_update_batch(self, ts: str) -> int:
+        if self.use_postgres:
+            return self._create_update_batch_pg(ts)
+        # SQLite path
+        cursor = self.connection.cursor()
+        cursor.execute("INSERT INTO update_batch (ts) VALUES (?)", (ts,))
+        self.connection.commit()
+        return cursor.lastrowid
+
+    def insert_fact(self, leaderboard_id: int, update_id: int, player_id: int, points: float):
+        if self.use_postgres:
+            return self._insert_fact_pg(leaderboard_id, update_id, player_id, points)
+        # SQLite path
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO facts (leaderboard_id, update_id, player_id, points)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(leaderboard_id, player_id, update_id)
+            DO UPDATE SET points = excluded.points
+            """,
+            (leaderboard_id, update_id, player_id, points),
+        )
+        self.connection.commit()
     
-    def get_or_create_leaderboard_table(self, game: str, blind_level: str) -> str:
+    def _get_or_create_leaderboard_id_pg(self, name: str) -> int:
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO leaderboards (name)
+            VALUES (%s)
+            ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+            RETURNING id
+            """,
+            (name,),
+        )
+        lb_id = cursor.fetchone()[0]
+        self.connection.commit()
+        return lb_id
+
+    def _get_or_create_player_id_pg(self, name: str, country: Optional[str]) -> int:
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO players (name, country)
+            VALUES (%s, %s)
+            ON CONFLICT (name) DO UPDATE SET country = COALESCE(players.country, EXCLUDED.country)
+            RETURNING id
+            """,
+            (name, country),
+        )
+        player_id = cursor.fetchone()[0]
+        self.connection.commit()
+        return player_id
+
+    def _create_update_batch_pg(self, ts: str) -> int:
+        cursor = self.connection.cursor()
+        cursor.execute(
+            "INSERT INTO update_batch (ts) VALUES (%s) RETURNING id",
+            (ts,),
+        )
+        update_id = cursor.fetchone()[0]
+        self.connection.commit()
+        return update_id
+
+    def _insert_fact_pg(self, leaderboard_id: int, update_id: int, player_id: int, points: float):
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO facts (leaderboard_id, update_id, player_id, points)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (leaderboard_id, player_id, update_id)
+            DO UPDATE SET points = EXCLUDED.points
+            """,
+            (leaderboard_id, update_id, player_id, points),
+        )
+        self.connection.commit()
+    
+    def get_leaderboard_table_name(self, game: str, blind_level: str) -> str:
         """Get or create leaderboard table for game/blind level"""
         table_name = f"{game} - {blind_level}"
-        safe_table_name = self._sanitize_table_name(table_name)
+        return self._sanitize_table_name(table_name)
         
-        try:
-            if self.use_postgres:
-                return self._get_or_create_postgres_table(safe_table_name, game, blind_level)
-            else:
-                return self._get_or_create_sqlite_table(safe_table_name, game, blind_level)
-        except Exception as e:
-            print(f"❌ Error getting/creating table: {e}")
-            raise
+        
     
-    def _get_or_create_postgres_table(self, table_name: str, game: str, blind_level: str) -> str:
-        """PostgreSQL table creation"""
-        cursor = self.connection.cursor()
-        
-        # Check if table exists
-        cursor.execute("""
-            SELECT table_name FROM information_schema.tables 
-            WHERE table_name = %s
-        """, (table_name,))
-        
-        table_exists = cursor.fetchone() is not None
-        
-        if not table_exists:
-            # Create new table
-            cursor.execute(f"""
-                CREATE TABLE "{table_name}" (
-                    player TEXT PRIMARY KEY,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            print(f"  🆕 Created new PostgreSQL table: {table_name}")
-        else:
-            print(f"  📋 Using existing PostgreSQL table: {table_name}")
-        
-        # Update tracking record
-        cursor.execute("""
-            INSERT INTO leaderboard_tables (table_name, game_type, blind_level, last_updated) 
-            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT (table_name) DO UPDATE SET last_updated = CURRENT_TIMESTAMP
-        """, (table_name, game, blind_level))
-        
-        self.connection.commit()
-        return table_name
-    
-    def _get_or_create_sqlite_table(self, table_name: str, game: str, blind_level: str) -> str:
-        """SQLite table creation (your existing code)"""
-        cursor = self.connection.cursor()
-        
-        # Check if table exists
-        cursor.execute("""
-            SELECT name FROM sqlite_master 
-            WHERE type='table' AND name=?
-        """, (table_name,))
-        
-        table_exists = cursor.fetchone() is not None
-        
-        if not table_exists:
-            # Create new table
-            cursor.execute(f"""
-                CREATE TABLE "{table_name}" (
-                    player TEXT PRIMARY KEY,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            print(f"  �� Created new SQLite table: {table_name}")
-        else:
-            print(f"  �� Using existing SQLite table: {table_name}")
-        
-        # Update tracking record
-        cursor.execute("""
-            INSERT OR REPLACE INTO leaderboard_tables 
-            (table_name, game_type, blind_level, last_updated) 
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        """, (table_name, game, blind_level))
-        
-        self.connection.commit()
-        return table_name
-    
-    def add_timestamp_column(self, table_name: str, timestamp: str) -> bool:
-        """Add timestamp column to table"""
-        try:
-            safe_column_name = self._sanitize_column_name(timestamp)
-            
-            if self.use_postgres:
-                return self._add_postgres_timestamp_column(table_name, safe_column_name)
-            else:
-                return self._add_sqlite_timestamp_column(table_name, safe_column_name)
-        except Exception as e:
-            print(f"❌ Error adding timestamp column: {e}")
-            return False
-    
-    def _add_postgres_timestamp_column(self, table_name: str, column_name: str) -> bool:
-        """Add timestamp column to PostgreSQL table"""
-        cursor = self.connection.cursor()
-
-        # Add column idempotently without backfilling existing rows (metadata-only)
-        # 1) Add column without default (fast)
-        
-        cursor.execute(
-            f"ALTER TABLE \"{table_name}\" ADD COLUMN IF NOT EXISTS \"{column_name}\" TEXT"
-        )
-        # 2) Set default for future inserts only (metadata-only)
-       
-        cursor.execute(
-            f"ALTER TABLE \"{table_name}\" ALTER COLUMN \"{column_name}\" SET DEFAULT %s",
-            ("0",),
-        )
-       
-        self.connection.commit()
-        print(f"    ✅ Ensured PostgreSQL column exists with default: {column_name}")
-        
-        # Prune old columns if needed
-        if self.max_ts_columns and self.max_ts_columns > 0:
-            self._prune_postgres_timestamp_columns(table_name, self.max_ts_columns)
-        
-        return True
-    
-    def _add_sqlite_timestamp_column(self, table_name: str, column_name: str) -> bool:
-        """Add timestamp column to SQLite table (your existing code)"""
-        cursor = self.connection.cursor()
-        
-        # Check if column exists
-        cursor.execute(f"PRAGMA table_info('{table_name}')")
-        columns = [col[1] for col in cursor.fetchall()]
-        
-        if column_name in columns:
-            print(f"    ⚠️ Column {column_name} already exists in {table_name}")
-            return True
-        
-        # Add new column
-        cursor.execute(f"""
-            ALTER TABLE "{table_name}" 
-            ADD COLUMN "{column_name}" TEXT DEFAULT '0'
-        """)
-        
-        self.connection.commit()
-        print(f"    ✅ Added new SQLite column: {column_name}")
-        
-        # Prune old columns if needed
-        if self.max_ts_columns and self.max_ts_columns > 0:
-            self._prune_sqlite_timestamp_columns(table_name, self.max_ts_columns)
-        
-        return True
-    
-    def update_player_points(self, table_name: str, player: str, timestamp: str, points: str):
-        """Update player points for timestamp"""
-        try:
-            safe_column_name = self._sanitize_column_name(timestamp)
-            
-            if self.use_postgres:
-                self._update_postgres_player_points(table_name, player, safe_column_name, points)
-            else:
-                
-                self._update_sqlite_player_points(table_name, player, safe_column_name, points)
-        except Exception as e:
-            print(f"❌ Error updating player points: {e}")
-    
-    def _update_postgres_player_points(self, table_name: str, player: str, column_name: str, points: str):
-        """Update player points in PostgreSQL"""
-        cursor = self.connection.cursor()
-
-        # Use single upsert to avoid extra round-trips and improve performance
-        cursor.execute(
-            f"""
-            INSERT INTO "{table_name}" (player, "{column_name}")
-            VALUES (%s, %s)
-            ON CONFLICT (player)
-            DO UPDATE SET "{column_name}" = EXCLUDED."{column_name}"
-            """,
-            (player, points),
-        )
-
-        self.connection.commit()
-    
-    def _update_sqlite_player_points(self, table_name: str, player: str, column_name: str, points: str):
-        """Update player points in SQLite (your existing code)"""
-        cursor = self.connection.cursor()
-        
-        # Check if player exists
-        cursor.execute(f"""
-            SELECT player FROM "{table_name}" WHERE player = ?
-        """, (player,))
-        
-        player_exists = cursor.fetchone() is not None
-        
-        if player_exists:
-            # Update existing player
-          
-            cursor.execute(f"""
-                UPDATE "{table_name}" 
-                SET "{column_name}" = ? 
-                WHERE player = ?
-            """, (points, player))
-           
-        else:
-            # Create new player record
-            cursor.execute(f"""
-                INSERT INTO "{table_name}" (player, "{column_name}")
-                VALUES (?, ?)
-            """, (player, points))
-        
-        self.connection.commit()
-    
+   
     # --- Name sanitizers (restored) ---
     def _sanitize_table_name(self, name: str) -> str:
         """Sanitize table name for SQLite/PostgreSQL compatibility"""
@@ -403,3 +368,6 @@ class DatabaseManager:
         if hasattr(self, 'connection') and self.connection:
             self.connection.close()
             print("🔒 Database connection closed")
+
+
+

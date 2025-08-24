@@ -226,7 +226,7 @@ class GGPokerScraper:
                     blind_text_element.click()
                     
                     # Wait a moment for the dropdown to open
-                    time.sleep(1)
+                    time.sleep(2)
                     
                     # Check if the dropdown now has 'layer-open' class
                     classes = dropdown.get_attribute("class")
@@ -238,7 +238,7 @@ class GGPokerScraper:
                         print(f"  🖱️ Clicking on list element {i}...")
 
                         list_element.click()
-                        time.sleep(5)
+                        time.sleep(7)
 
                         # Now extract player ranking data from the table
                         self.extract_player_ranking_data(text_content)
@@ -277,40 +277,51 @@ class GGPokerScraper:
             print(f"    📋 Found {len(tr_elements)} table rows")
             
             # Get timestamp and blind level info
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"  {timestamp} - {text_content}")
             
             # Extract blind level from text_content (e.g., "$0.01/$0.02")
             blind_level = text_content.strip()
             
-            # Get or create the leaderboard table for this game and blind level
-            table_name = self.db_manager.get_or_create_leaderboard_table(game, blind_level)
-            print(f"    📊 Using table: {table_name}")
+            # Build leaderboard name (same as before via DB manager sanitizer)
+            table_name = self.db_manager.get_leaderboard_table_name(game, blind_level)
+            print(f"   Table name: {table_name}")
             
-            # Add timestamp column to the table
-            self.db_manager.add_timestamp_column(table_name, timestamp)
+            # Normalized path: create update batch and resolve leaderboard id
+            lb_id = self.db_manager.get_or_create_leaderboard_id(table_name)
+            update_id = self.db_manager.create_update_batch(timestamp)
             
             # Process each player row
             for i, tr in enumerate(tr_elements, 1):
                 try:
-                    # Find all td tags in this row
                     td_elements = tr.find_elements(By.TAG_NAME, "td")
-                    
-                    if len(td_elements) >= 4:  # Make sure we have at least 4 td elements
-                        # Get player name from 2nd td (index 1)
+                    if len(td_elements) >= 4:
+                        # name (td[1]), country (td[2]), points (td[3])
                         player_name = td_elements[1].get_attribute('textContent').strip() if td_elements[1].get_attribute('textContent') else ''
+                        # Extract country from the <span> child with 'data-title' attribute
+                        country = None
+                        try:
+                            span = td_elements[2].find_element(By.TAG_NAME, "span")
+                            country = span.get_attribute("data-title")
+                            if country:
+                                country = country.strip()
+                        except Exception:
+                            country = None
+                        # print(f"      🔍 Player: {player_name}, Country: {country}")
+                        points_text = td_elements[3].get_attribute('textContent').strip() if td_elements[3].get_attribute('textContent') else ''
                         
-                        # Get points from 4th td (index 3)
-                        points = td_elements[3].get_attribute('textContent').strip() if td_elements[3].get_attribute('textContent') else ''
-                        
-                        if player_name and points:  # Only add if both values exist
-                            # Store player data in database
-                            self.db_manager.update_player_points(table_name, player_name, timestamp, points)
+                        if player_name and points_text:
+                            # Convert points like "1,234.56" to float
+                            try:
+                                pts = float(points_text.replace(',', ''))
+                            except Exception:
+                                continue
+                            player_id = self.db_manager.get_or_create_player_id(player_name, country)
+                            self.db_manager.insert_fact(lb_id, update_id, player_id, pts)
                         else:
                             print(f"      ⚠️ Row {i}: Missing name or points")
                     else:
                         print(f"      ⚠️ Row {i}: Not enough td elements ({len(td_elements)})")
-                        
                 except Exception as e:
                     print(f"      ❌ Error processing row {i}: {e}")
                     continue
