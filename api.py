@@ -376,6 +376,7 @@ def fetch_top_players(leaderboard: str, limit: int = 50) -> List[str]:
                     (lb_id, lb_id, limit),
                 )
                 rows = cur.fetchall()
+                print([r[0] for r in rows])
                 return [r[0] for r in rows]
 
 
