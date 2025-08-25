@@ -74,16 +74,7 @@ class DatabaseManager:
         try:
             cursor = self.connection.cursor()
             
-            # Legacy tracking table (kept for compatibility)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS leaderboard_tables (
-                    table_name TEXT PRIMARY KEY,
-                    game_type TEXT NOT NULL,
-                    blind_level TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            
 
             # Normalized schema (new)
             cursor.execute("""

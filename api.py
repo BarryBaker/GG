@@ -361,7 +361,7 @@ def fetch_top_players(leaderboard: str, limit: int = 50) -> List[str]:
                       FROM update_batch ub
                       JOIN facts f ON f.update_id = ub.id
                       WHERE f.leaderboard_id = %s
-                        AND (ub.ts::time) < TIME '21:00:00'
+                        AND (ub.ts::time) < TIME '8:00:00'
                       GROUP BY date_trunc('day', ub.ts)
                     )
                     SELECT pl.name, SUM(f.points) AS total
