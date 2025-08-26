@@ -214,7 +214,7 @@ class GGPokerScraper:
             print(f"  ✅ Found 'blind-text' clickable element")
             
             dropdown = self.driver.find_element(By.CLASS_NAME, "dropdown-layer")
-            for i, list_element in enumerate(list_elements[4:7]):
+            for i, list_element in enumerate(list_elements):
                 try:
                     print(f"\n🖱️ Processing blind level {i}/{len(list_elements)}...")
                     
