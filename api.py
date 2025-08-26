@@ -229,16 +229,25 @@ def fetch_table_data(leaderboard: str, limit: int, last_columns: int) -> Dict[st
 def fetch_player_data(leaderboard: str, player_name: str) -> Dict[str, List]:
     """Return pivoted data for a player across ALL updates of the given leaderboard.
     Columns: [player, ts1..tsN] oldest→newest; Row: [name, points...] with 0 for missing.
+    Includes 'country' of the player.
     """
     driver, _ = resolve_db_config()
     if driver == "sqlite":
         with open_connection() as conn:
             cur = conn.cursor()
+            # Resolve leaderboard id
             cur.execute("SELECT id FROM leaderboards WHERE name = ?", (leaderboard,))
             row = cur.fetchone()
             if not row:
-                return {"columns": ["player"], "rows": [[player_name]]}
+                return {"columns": ["player"], "rows": [[player_name]], "country": None}
             lb_id = row[0]
+
+            # Fetch country
+            cur.execute("SELECT country FROM players WHERE name = ?", (player_name,))
+            crow = cur.fetchone()
+            country = crow[0] if crow and crow[0] is not None else None
+
+            # Get all update ids and timestamps for this leaderboard (only those that appear in facts)
             cur.execute(
                 """
                 SELECT ub.id, ub.ts
@@ -252,9 +261,11 @@ def fetch_player_data(leaderboard: str, player_name: str) -> Dict[str, List]:
             )
             updates = cur.fetchall()
             if not updates:
-                return {"columns": ["player"], "rows": [[player_name]]}
+                return {"columns": ["player"], "rows": [[player_name]], "country": country}
             update_ids = [u[0] for u in updates]
             ts_headers = [u[1] for u in updates]
+
+            # Fetch player's points for those updates
             placeholders = ",".join(["?"] * len(update_ids))
             cur.execute(
                 (
@@ -270,16 +281,22 @@ def fetch_player_data(leaderboard: str, player_name: str) -> Dict[str, List]:
             pts_by_update = {uid: 0 for uid in update_ids}
             for uid, pts in cur.fetchall():
                 pts_by_update[uid] = pts
+
             points_row = [pts_by_update[uid] for uid in update_ids]
-            return {"columns": ["player"] + ts_headers, "rows": [[player_name] + points_row]}
+            return {"columns": ["player"] + ts_headers, "rows": [[player_name] + points_row], "country": country}
     else:
         with open_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT id FROM leaderboards WHERE name = %s", (leaderboard,))
                 row = cur.fetchone()
                 if not row:
-                    return {"columns": ["player"], "rows": [[player_name]]}
+                    return {"columns": ["player"], "rows": [[player_name]], "country": None}
                 lb_id = row[0]
+                # Fetch country
+                cur.execute("SELECT country FROM players WHERE name = %s", (player_name,))
+                crow = cur.fetchone()
+                country = crow[0] if crow and crow[0] is not None else None
+
                 cur.execute(
                     """
                     SELECT ub.id, ub.ts
@@ -293,7 +310,7 @@ def fetch_player_data(leaderboard: str, player_name: str) -> Dict[str, List]:
                 )
                 updates = cur.fetchall()
                 if not updates:
-                    return {"columns": ["player"], "rows": [[player_name]]}
+                    return {"columns": ["player"], "rows": [[player_name]], "country": country}
                 update_ids = [u[0] for u in updates]
                 ts_headers = [u[1] for u in updates]
                 in_ph = ",".join(["%s"] * len(update_ids))
@@ -310,7 +327,7 @@ def fetch_player_data(leaderboard: str, player_name: str) -> Dict[str, List]:
                 for uid, pts in cur.fetchall():
                     pts_by_update[uid] = float(pts) if pts is not None else 0
                 points_row = [pts_by_update[uid] for uid in update_ids]
-                return {"columns": ["player"] + ts_headers, "rows": [[player_name] + points_row]}
+                return {"columns": ["player"] + ts_headers, "rows": [[player_name] + points_row], "country": country}
 
 
 def fetch_top_players(leaderboard: str, limit: int = 50) -> List[str]:
