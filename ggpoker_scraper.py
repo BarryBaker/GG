@@ -41,9 +41,15 @@ class GGPokerScraper:
         self.headless = headless
         self.setup_driver()
         
+        # Configurable targets per replica
+        self.promo_url = os.getenv("PROMO_URL", "https://ggpoker.com/promotions/omaha-daily-leaderboard/")
+        self.game_name = os.getenv("GAME_NAME", "PLO").strip()
+      
+        
         # Initialize database manager
         self.db_manager = DatabaseManager()
         print("✅ Database manager initialized")
+        print(f"⚙️  Config: PROMO_URL={self.promo_url} | GAME_NAME={self.game_name}")
 
     def setup_driver(self):
         """Set up the Chrome WebDriver with appropriate options"""
@@ -85,7 +91,7 @@ class GGPokerScraper:
 
     def access_ggpoker_page(self):
         """Access the GGPoker Omaha Daily Leaderboard page"""
-        url = "https://ggpoker.com/promotions/omaha-daily-leaderboard/"
+        url = self.promo_url
         
         try:
             print(f"🌐 Accessing: {url}")
@@ -107,21 +113,22 @@ class GGPokerScraper:
             return False
 
     def find_plo_section(self):
-        """Find the PLO section with the iframe"""
+        """Find the target game section with the iframe"""
         try:
-            # Look for the PLO heading
-            plo_heading = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//h4[contains(text(), 'PLO')]"))
+            # Look for the exact game heading (env GAME_NAME)
+            heading_xpath = f"//h4[normalize-space(text())='{self.game_name}']"
+            game_heading = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, heading_xpath))
             )
-            print("✅ Found PLO section heading")
+            print(f"✅ Found {self.game_name} section heading")
             
-            # Find the iframe within the PLO section
-            # The iframe should be near the PLO headinggit branch -M main
+            # Find the iframe that is the first responsive-iframe sibling under this heading
+            iframe_xpath = heading_xpath + "/following-sibling::div[contains(@class,'responsive-iframe')][1]//iframe"
             iframe = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+                EC.presence_of_element_located((By.XPATH, iframe_xpath))
             )
             
-            print("✅ Found iframe")
+            print("✅ Found matching iframe under heading")
             
             # Get the iframe source URL
             iframe_src = iframe.get_attribute("src")
@@ -130,7 +137,7 @@ class GGPokerScraper:
             return iframe, iframe_src
             
         except Exception as e:
-            print(f"❌ Error finding PLO section: {e}")
+            print(f"❌ Error finding {self.game_name} section: {e}")
             return None, None
 
     def click_iframe_link(self, iframe):
@@ -261,9 +268,11 @@ class GGPokerScraper:
             print(f"❌ Error during blind level iteration: {e}")
             return False
 
-    def extract_player_ranking_data(self, text_content, game='PLO'):
+    def extract_player_ranking_data(self, text_content, game=None):
         """Extract player name and points from the ranking table and store in database"""
         try:
+            if game is None:
+                game = self.game_name
             print("    🔍 Looking for playerRankingBody class...")
             
             # Wait for the player ranking body to be present
