@@ -420,8 +420,8 @@ def api_table_data(leaderboard: str):
     
     try: 
         # Defaults: last_columns=10, limit=15
-        limit = int(request.args.get("limit", 15))
-        last_cols = int(request.args.get("columns", 10))
+        limit = int(request.args.get("limit", 16))
+        last_cols = int(request.args.get("columns", 4))
         
         payload = fetch_table_data(leaderboard, limit=limit, last_columns=last_cols)
         return jsonify(payload)
