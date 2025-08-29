@@ -51,6 +51,20 @@ class GGPokerScraper:
         print("✅ Database manager initialized")
         print(f"⚙️  Config: PROMO_URL={self.promo_url} | GAME_NAME={self.game_name}")
 
+    def _build_xpath_literal(self, text: str) -> str:
+        """Return a valid XPath string literal for the given text.
+        Handles values containing single quotes by using concat().
+        """
+        if "'" not in text:
+            return f"'{text}'"
+        parts = text.split("'")
+        concat_parts = []
+        for i, part in enumerate(parts):
+            if i > 0:
+                concat_parts.append("\"'\"")  # add a literal single-quote between parts
+            concat_parts.append(f"'{part}'")
+        return "concat(" + ", ".join(concat_parts) + ")"
+
     def setup_driver(self):
         """Set up the Chrome WebDriver with appropriate options"""
         chrome_options = Options()
@@ -116,7 +130,8 @@ class GGPokerScraper:
         """Find the target game section with the iframe"""
         try:
             # Look for the exact game heading (env GAME_NAME)
-            heading_xpath = f"//h4[normalize-space(text())='{self.game_name}']"
+            name_literal = self._build_xpath_literal(self.game_name)
+            heading_xpath = f"//h4[normalize-space(text())={name_literal}]"
             game_heading = WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, heading_xpath))
             )
