@@ -4,7 +4,7 @@ HTTP API for listing and reading tables similarly to the viewer.
 
 Endpoints:
   GET  /health                                  → { status: ok }
-  GET  /tables?prefix=PLO                       → ["PLO_...", ...]
+  GET  /tables                                  → ["PLO_...", ...]
   GET  /tables/<table>/columns                  → column metadata
   GET  /tables/<table>/data?last_columns=10&limit=10
       → first column + last N columns, sorted by the last column DESC with NULLS LAST,
@@ -73,23 +73,20 @@ def open_connection():
     return conn
 
 
-def list_tables(prefix: str = "PLO") -> List[str]:
-    """List leaderboard names starting with prefix (works for both PG and SQLite)."""
-    like_pattern = f"{prefix}%"
+def list_tables() -> List[str]:
+    """List all leaderboard names (works for both PG and SQLite)."""
     driver, _ = resolve_db_config()
     with open_connection() as conn:
         cur = conn.cursor()
         if driver == "sqlite":
             cur.execute(
-                "SELECT name FROM leaderboards WHERE name LIKE ? ORDER BY name",
-                (like_pattern,),
+                "SELECT name FROM leaderboards ORDER BY name"
             )
             rows = cur.fetchall()
-            return [row[0] if isinstance(row, tuple) else row["name"] for row in rows]
+            return [row["name"] for row in rows]
         # postgres: read from leaderboards table too
         cur.execute(
-            "SELECT name FROM leaderboards WHERE name LIKE %s ORDER BY name",
-            (like_pattern,),
+            "SELECT name FROM leaderboards ORDER BY name"
         )
         return [r[0] for r in cur.fetchall()]
 
@@ -409,8 +406,7 @@ def health():
 @app.get("/tables")
 def api_tables():
     try:
-        prefix = request.args.get("prefix", "PLO")
-        return jsonify(list_tables(prefix=prefix))
+        return jsonify(list_tables())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -450,12 +446,7 @@ def api_top_players(table: str):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.get("/tables")
-def tables():
-    try:
-        return 'tables here'
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
